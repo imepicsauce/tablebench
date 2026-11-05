@@ -10,6 +10,10 @@
   const round = (v, d = 2) => { const m = 10 ** d; return Math.round(v * m) / m; };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const setVal = (el, v) => { if (document.activeElement !== el) el.value = v; };  // never rewrite a field being typed in
+  const tog = (el, on) => { el.classList.toggle("on", !!on); if (el.hasAttribute("aria-pressed")) el.setAttribute("aria-pressed", String(!!on)); };
+  const icon = n => `<svg class="ic" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+  const REDUCED = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  let uidCounter = 0;
 
   let unit = "mm";
   const mmToUnit = mm => unit === "mm" ? mm : mm / 25.4;
@@ -505,17 +509,36 @@
         const dist = Math.hypot(ci.x - cj.x, ci.z - cj.z) * SCALE;
         if (dist < (ci.footprint + cj.footprint) * 0.55) lift += cj.spec.t * SCALE + 0.004;
       }
-      ci.pivot.position.y = lift;
+      ci.baseY = lift; ci.pivot.position.y = lift + (ci.drop || 0);
     }
   }
 
+  function cardHalf(spec, rotDeg) {
+    const a = rotDeg * Math.PI / 180, c = Math.abs(Math.cos(a)), sn = Math.abs(Math.sin(a));
+    return [spec.w / 2 * c + spec.h / 2 * sn, spec.w / 2 * sn + spec.h / 2 * c];
+  }
+  // First open spot on the board, working outward from the centre
+  function freeSpot(spec) {
+    const gap = 6, [hx, hz] = cardHalf(spec, 0), sx = hx * 2 + gap, sz = hz * 2 + gap, pts = [];
+    for (let i = -6; i <= 6; i++) for (let j = -6; j <= 6; j++) pts.push([i * sx, j * sz]);
+    pts.sort((p, q) => Math.hypot(p[0], p[1]) - Math.hypot(q[0], q[1]) || q[0] - p[0]);
+    const fits = p => Math.abs(p[0]) + hx <= board.w / 2 && Math.abs(p[1]) + hz <= board.h / 2;
+    const free = p => cards.every(c => {
+      const [ox, oz] = cardHalf(c.spec, c.rot);
+      return Math.abs(p[0] - c.x) >= hx + ox + gap / 2 || Math.abs(p[1] - c.z) >= hz + oz + gap / 2;
+    });
+    return pts.find(p => fits(p) && free(p)) || [((cards.length % 7) - 3) * 10, ((cards.length % 5) - 2) * 10];
+  }
+
   function addCard() {
-    const n = cards.length, ang = n * 0.9, rad = Math.min(n * 4, Math.max(template.w, template.h) * 0.35);
-    const rec = buildCard(template, Math.cos(ang) * rad, Math.sin(ang) * rad, 0, false);
+    const [x, z] = freeSpot(template);
+    const rec = buildCard(template, x, z, 0, false);
     cards.push(rec);
+    if (!REDUCED) { rec.drop = 1.4; rec.dropT0 = performance.now(); }      // lands on the board
     updateStacking();
-    selectCard(rec.id);
+    selectCard(rec.id, true);
     updateSpecChips();
+    return rec;
   }
 
   function disposeCard(rec) {
@@ -526,16 +549,17 @@
     if (rec.texF) rec.texF.dispose();
     if (rec.texB) rec.texB.dispose();
   }
-  function removeCard(id) {
+  function removeCard(id, quiet) {
     const i = cards.findIndex(c => c.id === id); if (i < 0) return;
     disposeCard(cards[i]); cards.splice(i, 1);
     if (selectedId === id) selectedId = null;
     updateStacking(); syncEditor(); renderCardList(); updateSpecChips();
+    if (!quiet) toast(`Card ${i + 1} removed`, "Undo", undo);
   }
   function duplicateCard(id) {
     const src = cards.find(c => c.id === id); if (!src) return;
     const rec = buildCard(src.spec, src.x + 12, src.z + 12, src.rot, src.faceDown);
-    cards.push(rec); updateStacking(); selectCard(rec.id); updateSpecChips();
+    cards.push(rec); updateStacking(); selectCard(rec.id, true); updateSpecChips();
   }
   function rotateCard(id) {
     const rec = cards.find(c => c.id === id); if (!rec) return;
@@ -548,13 +572,14 @@
   function moveCard(rec, x, z) {
     const lim = Math.max(board.w, board.h) * 0.9 + 200;
     rec.x = clamp(x, -lim, lim); rec.z = clamp(z, -lim, lim);
-    placeCard(rec); updateStacking();
+    placeCard(rec); updateStacking(); syncPos();
   }
 
-  function selectCard(id) {
+  function selectCard(id, reveal) {
     selectedId = id;
     cards.forEach(c => { if (c.ring) c.ring.visible = c.id === id; });
     syncEditor(); renderCardList();
+    if (id != null && reveal) openSection("card");
   }
 
   /* =====================================================================
@@ -562,27 +587,30 @@
      ===================================================================== */
   function buildArtControl(mount, { label, maxDim, getArt, onChange }) {
     mount.classList.add("art");
+    const uid = "art" + (++uidCounter);
     mount.innerHTML = `
-      <div class="drop" tabindex="0" role="button" aria-label="Upload ${label} image">
-        <div class="thumb">＋</div>
-        <div class="meta"><div class="name"></div><div class="sub">Click or drop an image</div></div>
+      <div class="art-row">
+        <button class="drop" type="button">
+          <span class="thumb"></span>
+          <span class="art-meta"><span class="art-label">${label}</span><span class="art-name"></span></span>
+        </button>
         <div class="drop-actions">
-          <button class="icon-btn flip" type="button" title="Mirror horizontally">⇋</button>
-          <button class="icon-btn clear" type="button" title="Remove image">✕</button>
+          <button class="icon-btn flip" type="button" aria-pressed="false" aria-label="Mirror ${label} horizontally" title="Mirror horizontally">${icon("mirror")}</button>
+          <button class="icon-btn clear" type="button" aria-label="Remove ${label} image" title="Remove image">${icon("x")}</button>
         </div>
-        <input type="file" accept="image/*" hidden>
+        <input type="file" accept="image/*" hidden tabindex="-1">
       </div>
       <details class="adjust">
         <summary>Position &amp; zoom</summary>
         <div class="adj-body">
-          <div class="adj-row"><span>Zoom</span><input type="range" class="zoom" min="1" max="5" step="0.01" value="1"><output>1.00×</output></div>
-          <div class="adj-row"><span>Shift X</span><input type="range" class="px" min="-100" max="100" step="1" value="0"><output>0</output></div>
-          <div class="adj-row"><span>Shift Y</span><input type="range" class="py" min="-100" max="100" step="1" value="0"><output>0</output></div>
-          <button class="mini-btn reset" type="button">Reset position</button>
+          <div class="adj-row"><label for="${uid}-z">Zoom</label><input id="${uid}-z" type="range" class="zoom" min="1" max="5" step="0.01" value="1"><output for="${uid}-z">1.00×</output></div>
+          <div class="adj-row"><label for="${uid}-x">Shift X</label><input id="${uid}-x" type="range" class="px" min="-100" max="100" step="1" value="0"><output for="${uid}-x">0</output></div>
+          <div class="adj-row"><label for="${uid}-y">Shift Y</label><input id="${uid}-y" type="range" class="py" min="-100" max="100" step="1" value="0"><output for="${uid}-y">0</output></div>
+          <button class="btn-ghost reset" type="button">Reset position</button>
         </div>
       </details>`;
     const q = s => mount.querySelector(s);
-    const drop = q(".drop"), thumb = q(".thumb"), nameEl = q(".name"), subEl = q(".sub"), file = q("input[type=file]");
+    const row = q(".art-row"), drop = q(".drop"), thumb = q(".thumb"), nameEl = q(".art-name"), file = q("input[type=file]");
     const flipBtn = q(".flip"), clearBtn = q(".clear"), adjust = q(".adjust");
     const zoom = q(".zoom"), px = q(".px"), py = q(".py"), resetBtn = q(".reset");
     const outs = { zoom: zoom.nextElementSibling, px: px.nextElementSibling, py: py.nextElementSibling };
@@ -590,10 +618,10 @@
     function refresh() {
       const a = getArt(), has = !!a.img;
       thumb.style.backgroundImage = has ? `url(${a.img.thumb})` : "";
-      thumb.textContent = has ? "" : "＋";
-      nameEl.textContent = has ? a.img.name : label;
-      subEl.textContent = has ? `${a.img.w}×${a.img.h}px` : "Click or drop an image";
-      flipBtn.classList.toggle("on", a.flip);
+      thumb.innerHTML = has ? "" : icon("upload");
+      nameEl.textContent = has ? `${a.img.name} · ${a.img.w}×${a.img.h}px` : "Click or drop an image";
+      drop.setAttribute("aria-label", has ? `Replace ${label} image, currently ${a.img.name}` : `Upload ${label} image`);
+      tog(flipBtn, a.flip);
       flipBtn.disabled = clearBtn.disabled = !has;
       adjust.classList.toggle("disabled", !has);
       setVal(zoom, a.zoom); setVal(px, a.px); setVal(py, a.py);
@@ -609,18 +637,17 @@
         const a = getArt(); a.img = info; a.zoom = 1; a.px = 0; a.py = 0;
         onChange(); refresh();
         adjust.open = true;
-      } catch (e) { nameEl.textContent = "Couldn't read that image"; }
+      } catch (e) { nameEl.textContent = "Couldn't read that image. Try a PNG or JPG."; }
     }
 
-    drop.addEventListener("click", e => { if (!e.target.closest(".drop-actions")) file.click(); });
-    drop.addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && e.target === drop) { e.preventDefault(); file.click(); } });
+    drop.addEventListener("click", () => file.click());
     file.addEventListener("change", () => { handle(file.files[0]); file.value = ""; });
-    ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("dragover"); }));
-    ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("dragover"); }));
-    drop.addEventListener("drop", e => handle(e.dataTransfer.files && e.dataTransfer.files[0]));
+    ["dragenter", "dragover"].forEach(ev => row.addEventListener(ev, e => { e.preventDefault(); row.classList.add("dragover"); }));
+    ["dragleave", "drop"].forEach(ev => row.addEventListener(ev, e => { e.preventDefault(); row.classList.remove("dragover"); }));
+    row.addEventListener("drop", e => handle(e.dataTransfer.files && e.dataTransfer.files[0]));
 
-    flipBtn.addEventListener("click", e => { e.stopPropagation(); const a = getArt(); a.flip = !a.flip; onChange(); refresh(); });
-    clearBtn.addEventListener("click", e => { e.stopPropagation(); const a = getArt(); a.img = null; a.zoom = 1; a.px = 0; a.py = 0; a.flip = false; onChange(); refresh(); });
+    flipBtn.addEventListener("click", () => { const a = getArt(); a.flip = !a.flip; onChange(); refresh(); });
+    clearBtn.addEventListener("click", () => { const a = getArt(); a.img = null; a.zoom = 1; a.px = 0; a.py = 0; a.flip = false; onChange(); refresh(); });
     [[zoom, "zoom"], [px, "px"], [py, "py"]].forEach(([el, key]) => el.addEventListener("input", () => {
       getArt()[key] = parseFloat(el.value); onChange(); refresh();
     }));
@@ -653,26 +680,27 @@
   ];
   function buildMaterialControl(mount, { label, getMat, onChange }) {
     mount.classList.add("mat");
+    const mid = "mat" + (++uidCounter);
     mount.innerHTML = `
-      <div class="field"><label>${label}</label></div>
-      <div class="presets"></div>
+      <div class="grp-label" id="${mid}-l">${label}</div>
+      <div class="presets" role="group" aria-labelledby="${mid}-l"></div>
       <p class="foot-note mat-desc"></p>
       <div class="field">
-        <label><span class="knob">Strength</span> <span class="cap val"></span></label>
-        <input type="range" min="0" max="100" step="1" value="55">
+        <label for="${mid}-r"><span class="knob">Strength</span> <output class="cap val" for="${mid}-r"></output></label>
+        <input type="range" id="${mid}-r" min="0" max="100" step="1" value="55">
       </div>`;
     const grid = mount.querySelector(".presets"), desc = mount.querySelector(".mat-desc");
     const knob = mount.querySelector(".knob"), val = mount.querySelector(".val"), range = mount.querySelector("input[type=range]");
     MATERIALS.forEach(m => {
       const b = document.createElement("button");
-      b.type = "button"; b.className = "preset-btn"; b.textContent = m.name; b.dataset.id = m.id;
+      b.type = "button"; b.className = "preset-btn"; b.textContent = m.name; b.dataset.id = m.id; b.setAttribute("aria-pressed", "false");
       b.addEventListener("click", () => { getMat().kind = m.id; onChange(); refresh(); });
       grid.appendChild(b);
     });
     range.addEventListener("input", () => { getMat().k = parseFloat(range.value) / 100; onChange(); refresh(); });
     function refresh() {
       const m = getMat(), def = MATERIALS.find(x => x.id === m.kind);
-      Array.from(grid.children).forEach(b => b.classList.toggle("active", b.dataset.id === m.kind));
+      Array.from(grid.children).forEach(b => { const on = b.dataset.id === m.kind; b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on)); });
       desc.textContent = def.desc;
       knob.textContent = def.knob || "Strength";
       range.disabled = !def.knob;
@@ -689,17 +717,17 @@
      UI: dimensions, presets, editor sync
      ===================================================================== */
   function buildPresets(mount, presets, apply) {
-    [...presets, { name: "Custom", custom: true }].forEach(p => {
+    presets.forEach(p => {
       const b = document.createElement("button");
       b.type = "button"; b.className = "preset-btn"; b.textContent = p.name;
-      b.dataset.name = p.name;
-      b.addEventListener("click", () => { if (!p.custom) apply(p); });
+      b.dataset.name = p.name; b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", () => apply(p));
       mount.appendChild(b);
     });
   }
   function highlightPreset(mount, presets, s) {
     const hit = presets.find(p => Math.abs(p.w - s.w) < 0.01 && Math.abs(p.h - s.h) < 0.01 && Math.abs(p.t - s.t) < 0.005 && Math.abs(p.r - s.r) < 0.01);
-    Array.from(mount.children).forEach(b => b.classList.toggle("active", b.dataset.name === (hit ? hit.name : "Custom")));
+    Array.from(mount.children).forEach(b => { const on = !!hit && b.dataset.name === hit.name; b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on)); });
   }
 
   // Board inputs
@@ -714,6 +742,7 @@
     $("boardRMax").textContent = "max " + round(mx, 1) + " " + unit;
     [bW, bH, bT, bRI].forEach(el => el.step = unit === "mm" ? "any" : "any");
     highlightPreset($("boardPresets"), BOARD_PRESETS, board);
+    updateSummaries();
   }
   function boardChanged() { board.r = Math.min(board.r, boardMaxR()); syncBoardUI(); rebuildBoard(); }
   [[bW, "w", 30], [bH, "h", 30], [bT, "t", 1]].forEach(([el, key, min]) => el.addEventListener("input", () => {
@@ -740,12 +769,32 @@
     $("cardRMax").textContent = "max " + round(mx, 2) + " " + unit;
     highlightPreset($("cardPresets"), CARD_PRESETS, s);
     frontArtCtl.refresh(); backArtCtl.refresh(); cardMatCtl.refresh();
-    $("editBadge").textContent = rec ? "Card " + (cards.indexOf(rec) + 1) : "Template";
+    const html = rec
+      ? `<b>Editing Card ${cards.indexOf(rec) + 1}</b>Changes apply to this card and to the next card you add.`
+      : `<b>New-card defaults</b>No card selected. Changes here shape the next card you add.`;
+    if (html !== lastEditHtml) { lastEditHtml = html; $("editState").innerHTML = html; }
+    $("editStrip").classList.toggle("editing", !!rec);
     $("deselectBtn").hidden = !rec;
-    $("editNote").textContent = rec
-      ? "Editing this card live. New cards start from these settings."
-      : "Nothing selected — edits set up the template used by “Add card”.";
+    $("posRow").hidden = !rec;
+    syncPos(); updateSummaries();
   }
+  let lastEditHtml = "";
+  const posLim = () => Math.max(board.w, board.h) * 0.9 + 200;
+  function syncPos() {
+    const r = selectedRec(); if (!r) return;
+    setVal($("cardX"), fmtLen(r.x, 1)); setVal($("cardZ"), fmtLen(r.z, 1)); setVal($("cardRot"), round(r.rot, 1));
+    $("posUnit").textContent = unit; $("posUnit2").textContent = unit;
+  }
+  [["cardX", (r, v) => { r.x = clamp(unitToMm(v), -posLim(), posLim()); }],
+   ["cardZ", (r, v) => { r.z = clamp(unitToMm(v), -posLim(), posLim()); }],
+   ["cardRot", (r, v) => { r.rot = ((v % 360) + 360) % 360; }]].forEach(([id, fn]) => {
+    $(id).addEventListener("input", () => {
+      const r = selectedRec(), v = parseFloat($(id).value);
+      if (!r || isNaN(v)) return;
+      fn(r, v); placeCard(r); updateStacking(); renderCardList();
+    });
+    $(id).addEventListener("change", syncPos);
+  });
 
   function commitEdit(kind) {                       // kind: "dims" | "front" | "back"
     const rec = selectedRec(), s = targetSpec();
@@ -774,54 +823,76 @@
   cRS.addEventListener("input", () => setCardR(parseFloat(cRS.value)));
   buildPresets($("cardPresets"), CARD_PRESETS, p => { const s = targetSpec(); Object.assign(s, { w: p.w, h: p.h, t: p.t, r: p.r }); commitEdit("dims"); });
 
-  $("unitToggle").addEventListener("click", e => {
-    const b = e.target.closest("button"); if (!b || b.dataset.unit === unit) return;
-    unit = b.dataset.unit;
-    Array.from($("unitToggle").children).forEach(c => c.classList.toggle("active", c === b));
-    syncBoardUI(); syncEditor();
-  });
+  function setUnit(u) {
+    if (u === unit) return;
+    unit = u;
+    Array.from($("unitToggle").children).forEach(c => { const on = c.dataset.unit === u; c.classList.toggle("active", on); c.setAttribute("aria-pressed", String(on)); });
+    syncBoardUI(); syncEditor(); scheduleSave();
+  }
+  $("unitToggle").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setUnit(b.dataset.unit); });
 
   $("deselectBtn").addEventListener("click", () => selectCard(null));
   $("addCardBtn").addEventListener("click", addCard);
-  $("clearCardsBtn").addEventListener("click", () => { cards.slice().forEach(c => removeCard(c.id)); });
+  $("clearCardsBtn").addEventListener("click", () => {
+    const n = cards.length; if (!n) return;
+    cards.slice().forEach(c => removeCard(c.id, true));
+    toast(`Cleared ${n} card${n > 1 ? "s" : ""}`, "Undo", undo);
+  });
 
   /* ---------- Card list ---------- */
   const cardListEl = $("cardList");
   function renderCardList() {
+    const ae = document.activeElement; let keep = null;
+    if (ae && cardListEl.contains(ae) && ae.closest(".card-row")) keep = { id: ae.closest(".card-row").dataset.id, a: ae.dataset.action || "" };
     cardListEl.textContent = "";
     if (!cards.length) {
-      const d = document.createElement("div");
-      d.className = "empty-hint"; d.textContent = "No cards on the table yet. Add one above, then drag it around the board.";
-      cardListEl.appendChild(d); return;
+      const li = document.createElement("li");
+      li.className = "empty-hint"; li.textContent = "No cards on the table yet. Use Add card below, then drag it around the board.";
+      cardListEl.appendChild(li); return;
     }
     cards.forEach((rec, i) => {
-      const row = document.createElement("div");
-      row.className = "card-row" + (rec.id === selectedId ? " selected" : "");
-      row.dataset.id = rec.id;
-      const th = document.createElement("div"); th.className = "row-thumb";
+      const n = i + 1, sel = rec.id === selectedId;
+      const li = document.createElement("li");
+      li.className = "card-row" + (sel ? " selected" : ""); li.dataset.id = rec.id;
+      const main = document.createElement("button"); main.type = "button"; main.className = "row-main";
+      if (sel) main.setAttribute("aria-current", "true");
+      const th = document.createElement("span"); th.className = "row-thumb";
       const art = rec.faceDown ? rec.spec.back : rec.spec.front;
       if (art.img) th.style.backgroundImage = `url(${art.img.thumb})`;
-      const meta = document.createElement("div"); meta.className = "row-meta";
-      const nm = document.createElement("div"); nm.className = "row-name"; nm.textContent = "Card " + (i + 1);
-      const sb = document.createElement("div"); sb.className = "row-sub";
-      sb.textContent = `${round(rec.spec.w, 1)}×${round(rec.spec.h, 1)} · ${rec.faceDown ? "down" : "up"} · ${rec.rot}°`;
-      sb.title = sb.textContent;
-      meta.append(nm, sb);
+      const meta = document.createElement("span"); meta.className = "row-meta";
+      const nm = document.createElement("span"); nm.className = "row-name"; nm.textContent = "Card " + n;
+      const sb = document.createElement("span"); sb.className = "row-sub";
+      sb.textContent = `${fmtLen(rec.spec.w, 1)}×${fmtLen(rec.spec.h, 1)} · ${rec.faceDown ? "down" : "up"} · ${round(rec.rot, 0)}°`;
+      meta.append(nm, sb); main.append(th, meta);
       const act = document.createElement("div"); act.className = "row-actions";
-      [["rotate", "⟳", "Rotate 90°"], ["flip", "⇅", "Flip face up/down"], ["dup", "⧉", "Duplicate"], ["del", "✕", "Remove"]].forEach(([a, ch, title]) => {
-        const b = document.createElement("button"); b.type = "button"; b.className = "icon-btn"; b.dataset.action = a; b.title = title; b.textContent = ch; act.appendChild(b);
+      [["rotate", "rotate", `Rotate card ${n} by 90 degrees`], ["flip", "flip", `Turn card ${n} face ${rec.faceDown ? "up" : "down"}`],
+       ["dup", "copy", `Duplicate card ${n}`], ["del", "trash", `Remove card ${n}`]].forEach(([a, ic, label]) => {
+        const b = document.createElement("button"); b.type = "button"; b.className = "icon-btn" + (a === "del" ? " danger" : "");
+        b.dataset.action = a; b.title = label; b.setAttribute("aria-label", label); b.innerHTML = icon(ic); act.appendChild(b);
       });
-      row.append(th, meta, act);
-      cardListEl.appendChild(row);
+      li.append(main, act);
+      cardListEl.appendChild(li);
     });
+    if (keep) {
+      const row = cardListEl.querySelector(`[data-id="${keep.id}"]`);
+      const t = row && (keep.a ? row.querySelector(`[data-action="${keep.a}"]`) : row.querySelector(".row-main"));
+      if (t) t.focus();
+    }
   }
   cardListEl.addEventListener("click", e => {
     const row = e.target.closest(".card-row"); if (!row) return;
     const id = parseInt(row.dataset.id, 10), btn = e.target.closest("[data-action]");
-    if (btn) {
-      ({ rotate: rotateCard, flip: flipCard, dup: duplicateCard, del: removeCard })[btn.dataset.action](id);
-    } else selectCard(id);
+    if (btn) ({ rotate: rotateCard, flip: flipCard, dup: duplicateCard, del: id2 => removeCard(id2) })[btn.dataset.action](id);
+    else if (e.target.closest(".row-main")) selectCard(id, true);
   });
+
+  function updateSummaries() {
+    const mn = k => (MATERIALS.find(m => m.id === k) || MATERIALS[0]).name;
+    $("sumBoard").textContent = `${fmtLen(board.w, 1)} × ${fmtLen(board.h, 1)} ${unit} · ${mn(board.mat.kind)}`;
+    const sp = targetSpec(), rec = selectedRec();
+    $("sumCard").textContent = `${rec ? "Card " + (cards.indexOf(rec) + 1) : "New-card defaults"} · ${fmtLen(sp.w, 1)} × ${fmtLen(sp.h, 1)} ${unit}`;
+    $("sumTable").textContent = cards.length ? `${cards.length} card${cards.length > 1 ? "s" : ""}` : "Empty";
+  }
 
   function updateSpecChips() {
     const chips = $("specChips"); chips.textContent = "";
@@ -829,6 +900,7 @@
       const el = document.createElement("div"); el.className = "spec-chip";
       const b = document.createElement("b"); b.textContent = k; el.append(b, " " + v); chips.appendChild(el);
     });
+    updateSummaries();
   }
 
   /* =====================================================================
@@ -971,20 +1043,24 @@
   function stopShot() { endShot(); }
   function shotProg(f) { $("shotProg").style.width = (f * 100).toFixed(1) + "%"; }
   function syncShotUI() {
-    document.querySelectorAll("[data-shot]").forEach(b => b.classList.toggle("running", !!shot && !shot.silent && shot.kind === b.dataset.shot));
+    document.querySelectorAll("[data-shot]").forEach(b => { const on = !!shot && !shot.silent && shot.kind === b.dataset.shot; b.classList.toggle("running", on); b.setAttribute("aria-pressed", String(on)); });
     $("stopShotBtn").disabled = !(shot && !shot.silent);
     if (!shot) shotProg(0);
   }
 
   /* ---------- Cinematic UI state ---------- */
   function applyCineUI() {
-    $("cineSmoothBtn").classList.toggle("on", cine.smooth);
-    $("cineSwayBtn").classList.toggle("on", cine.sway);
-    $("cineBarsBtn").classList.toggle("on", cine.bars);
-    $("loopBtn").classList.toggle("on", cine.loop);
+    tog($("cineSmoothBtn"), cine.smooth);
+    tog($("cineSwayBtn"), cine.sway);
+    tog($("cineBarsBtn"), cine.bars);
+    tog($("loopBtn"), cine.loop);
     $("cineAmt").disabled = !cine.smooth;
     $("stage").classList.toggle("letterbox", freeMode && cine.bars);
-    $("stageMode").textContent = !freeMode ? "live render" : (cine.smooth ? "freecam · cinematic" : "freecam");
+    $("stageMode").textContent = !freeMode ? "Live render" : (cine.smooth ? "Free camera · cinematic" : "Free camera");
+  }
+  function toggleBars() {
+    cine.bars = !cine.bars; applyCineUI();
+    if (cine.bars && freeMode) toast("Letterbox on. Press B to turn it off, or hover the toolbar.", null, null, 5000);
   }
   function toggleSmooth() {
     cine.smooth = !cine.smooth;
@@ -993,9 +1069,9 @@
   }
 
   function updateHint() {
-    $("hintText").textContent = freeMode
-      ? "FREECAM · drag to look · WASD move · Q/E down/up · Shift boost · C smooth · 1–5 camera moves · Esc exit"
-      : "drag empty space to orbit · drag a card to move it · scroll to zoom";
+    viewportEl.setAttribute("aria-label", freeMode
+      ? "3D view, free camera. Drag to look, W A S D to move, Escape to exit."
+      : "3D view of the board and cards. Drag to orbit, scroll to zoom, arrow keys nudge the selected card.");
   }
   function setFreeMode(on) {
     if (on === freeMode) return;
@@ -1008,12 +1084,12 @@
       camera.fov = ORBIT_FOV; camera.updateProjectionMatrix(); fFov = tFov = ORBIT_FOV;
     }
     freeMode = on;
-    $("freeCamBtn").classList.toggle("on", on);
-    $("freePanel").classList.toggle("show", on);
-    $("autoRotateBtn").classList.toggle("dim", on);
+    tog($("freeCamBtn"), on);
+    $("freePanel").hidden = !on;
+    $("autoRotateBtn").disabled = on;
     $("crosshair").classList.toggle("show", on);
     viewportEl.classList.toggle("free", on);
-    $("topViewBtn").classList.toggle("on", !on && topView);
+    tog($("topViewBtn"), !on && topView);
     applyCineUI(); updateHint();
   }
 
@@ -1059,21 +1135,21 @@
     camera.rotation.set(fPitch + rp, fYaw + ry, fRoll + rr, "YXZ");
   }
 
-  $("freeCamBtn").addEventListener("click", function () { setFreeMode(!freeMode); this.blur(); });
+  $("freeCamBtn").addEventListener("click", function () { setFreeMode(!freeMode); });
   $("flySpeed").addEventListener("input", function () { fSpeed = parseFloat(this.value); $("flySpeedVal").textContent = fSpeed; });
   $("fov").addEventListener("input", function () { tFov = parseFloat(this.value); $("fovVal").textContent = tFov + "°"; });
   $("cineAmt").addEventListener("input", function () { cine.amount = parseFloat(this.value) / 100; $("cineAmtVal").textContent = this.value; });
   $("shotDur").addEventListener("input", function () { cine.dur = parseFloat(this.value); $("shotDurVal").textContent = cine.dur + " s"; });
-  $("cineSmoothBtn").addEventListener("click", function () { toggleSmooth(); this.blur(); });
-  $("cineSwayBtn").addEventListener("click", function () { cine.sway = !cine.sway; applyCineUI(); this.blur(); });
-  $("cineBarsBtn").addEventListener("click", function () { cine.bars = !cine.bars; applyCineUI(); this.blur(); });
-  $("loopBtn").addEventListener("click", function () { cine.loop = !cine.loop; applyCineUI(); this.blur(); });
-  $("stopShotBtn").addEventListener("click", function () { stopShot(); this.blur(); });
-  document.querySelectorAll("[data-shot]").forEach(b => b.addEventListener("click", () => { startShot(b.dataset.shot); b.blur(); }));
-  $("autoRotateBtn").addEventListener("click", function () { if (freeMode) return; autoRotate = !autoRotate; this.classList.toggle("on", autoRotate); });
+  $("cineSmoothBtn").addEventListener("click", function () { toggleSmooth(); });
+  $("cineSwayBtn").addEventListener("click", function () { cine.sway = !cine.sway; applyCineUI(); });
+  $("cineBarsBtn").addEventListener("click", function () { toggleBars(); });
+  $("loopBtn").addEventListener("click", function () { cine.loop = !cine.loop; applyCineUI(); });
+  $("stopShotBtn").addEventListener("click", function () { stopShot(); });
+  document.querySelectorAll("[data-shot]").forEach(b => b.addEventListener("click", () => { startShot(b.dataset.shot); }));
+  $("autoRotateBtn").addEventListener("click", function () { if (freeMode) return; autoRotate = !autoRotate; tog(this, autoRotate); });
   $("topViewBtn").addEventListener("click", function () {
     if (freeMode) { topDownFree(); return; }
-    topView = !topView; this.classList.toggle("on", topView); targetPitch = topView ? 1.48 : 0.85;
+    topView = !topView; tog(this, topView); targetPitch = topView ? 1.48 : 0.85;
   });
   $("resetViewBtn").addEventListener("click", () => {
     if (freeMode) { resetFree(); return; }
@@ -1086,9 +1162,11 @@
     if (isTyping(e) || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
     if (k === "f" && !e.repeat) { setFreeMode(!freeMode); return; }
+    if (k === "escape" && !$("helpPanel").hidden) { setHelp(false); return; }
     if (!freeMode) return;
     if (k === "escape") { setFreeMode(false); return; }
     if (k === "c") { if (!e.repeat) toggleSmooth(); return; }
+    if (k === "b") { if (!e.repeat) toggleBars(); return; }
     if (k.length === 1 && k >= "1" && k <= "5") { if (!e.repeat) startShot(SHOT_ORDER[+k - 1]); return; }
     if (MOVE_KEYS.indexOf(k) < 0) return;
     if (k.startsWith("arrow") && e.target.tagName === "INPUT") return;   // let sliders use arrows
@@ -1126,10 +1204,12 @@
       dragRec = cards.find(c => c.id === id);
       const pt = groundPoint(e);
       grab = pt ? { x: dragRec.x - pt.x / SCALE, z: dragRec.z - pt.z / SCALE } : { x: 0, z: 0 };
-      if (selectedId !== id) selectCard(id);
+      if (selectedId !== id) selectCard(id, true);
+      viewportEl.focus({ preventScroll: true });
       mode = "card"; viewportEl.classList.add("dragging-card");
     } else {
       mode = "look"; if (freeMode) stopShot(); viewportEl.classList.add("dragging");
+      viewportEl.focus({ preventScroll: true });
     }
     viewportEl.setPointerCapture(e.pointerId);
   });
@@ -1172,6 +1252,205 @@
   viewportEl.addEventListener("touchend", () => { pinch = null; }, { passive: true });
 
   /* =====================================================================
+     Toasts · accordion · help · bottom sheet
+     ===================================================================== */
+  function toast(msg, actionLabel, fn, ms) {
+    const box = $("toasts"), t = document.createElement("div"); t.className = "toast";
+    const sp = document.createElement("span"); sp.textContent = msg; t.appendChild(sp);
+    let timer;
+    const close = () => { clearTimeout(timer); t.remove(); };
+    if (actionLabel) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = actionLabel;
+      b.addEventListener("click", () => { close(); fn(); }); t.appendChild(b);
+    }
+    while (box.children.length >= 2) box.firstChild.remove();
+    box.appendChild(t); timer = setTimeout(close, ms || 6000);
+  }
+
+  const SECS = ["board", "card", "table"];
+  function openSection(id, on = true) {
+    SECS.forEach(k => {
+      const open = on && k === id;
+      $("accBtn-" + k).setAttribute("aria-expanded", String(open));
+      $("accBody-" + k).hidden = !open;
+    });
+  }
+  SECS.forEach(k => $("accBtn-" + k).addEventListener("click", () => openSection(k, $("accBtn-" + k).getAttribute("aria-expanded") !== "true")));
+
+  $("sheetHandle").addEventListener("click", () => {
+    const open = !$("rail").classList.contains("open");
+    $("rail").classList.toggle("open", open); $("sheetHandle").setAttribute("aria-expanded", String(open));
+  });
+
+  function setHelp(on) { $("helpPanel").hidden = !on; $("helpBtn").setAttribute("aria-expanded", String(on)); }
+  $("helpBtn").addEventListener("click", () => setHelp($("helpPanel").hidden));
+  $("helpCloseBtn").addEventListener("click", () => { setHelp(false); $("helpBtn").focus(); });
+  $("freeCloseBtn").addEventListener("click", () => setFreeMode(false));
+
+  /* =====================================================================
+     History (undo / redo) and autosave
+     ===================================================================== */
+  const HIST_MAX = 60, STORE_KEY = "tablebench:v1";
+  const undoStack = [], redoStack = [];
+  let settledSnap = null, settledSig = "", lastSig = "", saveTimer = null, warnedQuota = false;
+
+  function snapshot() {
+    const art = a => ({ img: a.img, flip: a.flip, zoom: a.zoom, px: a.px, py: a.py });
+    const spec = sp => ({ w: sp.w, h: sp.h, t: sp.t, r: sp.r, front: art(sp.front), back: art(sp.back), mat: { kind: sp.mat.kind, k: sp.mat.k } });
+    return {
+      board: { w: board.w, h: board.h, t: board.t, r: board.r, art: art(board.art), mat: { kind: board.mat.kind, k: board.mat.k } },
+      template: spec(template),
+      cards: cards.map(c => ({ spec: spec(c.spec), x: c.x, z: c.z, rot: c.rot, faceDown: c.faceDown })),
+    };
+  }
+  const sigOf = snap => JSON.stringify(snap, (k, v) => k === "img" ? (v ? v.id : 0) : v);
+
+  function applySnapshot(sn) {
+    const selIdx = cards.findIndex(c => c.id === selectedId);
+    cards.slice().forEach(disposeCard); cards.length = 0;
+    Object.assign(board, { w: sn.board.w, h: sn.board.h, t: sn.board.t, r: sn.board.r, mat: { kind: sn.board.mat.kind, k: sn.board.mat.k } });
+    board.art = cloneArt(sn.board.art);
+    const t = cloneSpec(sn.template); Object.assign(template, t);
+    sn.cards.forEach(c => cards.push(buildCard(c.spec, c.x, c.z, c.rot, c.faceDown)));
+    selectedId = selIdx >= 0 && cards[selIdx] ? cards[selIdx].id : null;
+    rebuildBoard();
+    cards.forEach(c => { if (c.ring) c.ring.visible = c.id === selectedId; });
+    syncBoardUI(); boardArtCtl.refresh(); boardMatCtl.refresh(); syncEditor(); renderCardList();
+  }
+
+  function updateUndoUI(pending) {
+    $("undoBtn").disabled = !(undoStack.length || pending);
+    $("redoBtn").disabled = !redoStack.length;
+  }
+  function histInit() { settledSnap = snapshot(); settledSig = lastSig = sigOf(settledSnap); updateUndoUI(false); }
+  function settle() {
+    undoStack.push(settledSnap); if (undoStack.length > HIST_MAX) undoStack.shift();
+    redoStack.length = 0;
+    settledSnap = snapshot(); settledSig = sigOf(settledSnap);
+    updateUndoUI(false); scheduleSave();
+  }
+  // A change becomes one history step once it has stopped moving for a tick, so a slider drag is a single undo.
+  function histTick() {
+    if (!settledSnap) return;
+    const sig = sigOf(snapshot());
+    if (sig !== settledSig && sig === lastSig) settle();
+    lastSig = sig;
+    updateUndoUI(sig !== settledSig);
+  }
+  function flush() { if (!settledSnap) return; const sig = sigOf(snapshot()); if (sig !== settledSig) { settle(); lastSig = sig; } }
+  function adopt(sn) { applySnapshot(sn); settledSnap = snapshot(); settledSig = lastSig = sigOf(settledSnap); updateUndoUI(false); scheduleSave(); }
+  function undo() { flush(); if (!undoStack.length) return; redoStack.push(settledSnap); adopt(undoStack.pop()); }
+  function redo() { flush(); if (!redoStack.length) return; undoStack.push(settledSnap); adopt(redoStack.pop()); }
+  setInterval(histTick, 250);
+  $("undoBtn").addEventListener("click", undo);
+  $("redoBtn").addEventListener("click", redo);
+
+  /* ---------- Autosave (localStorage; images stored once each as JPEG) ---------- */
+  function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 700); }
+  function imgData(info) { if (!info._data) info._data = info.canvas.toDataURL("image/jpeg", 0.88); return info._data; }
+  function serialize(withImages) {
+    const sn = snapshot(), imgs = {};
+    const art = a => {
+      const o = { flip: a.flip, zoom: a.zoom, px: a.px, py: a.py };
+      if (a.img) { o.img = a.img.id; if (withImages && !imgs[a.img.id]) imgs[a.img.id] = { n: a.img.name, u: imgData(a.img) }; }
+      return o;
+    };
+    const spec = sp => ({ w: sp.w, h: sp.h, t: sp.t, r: sp.r, front: art(sp.front), back: art(sp.back), mat: sp.mat });
+    return {
+      v: 1, unit, imgs,
+      board: { w: sn.board.w, h: sn.board.h, t: sn.board.t, r: sn.board.r, art: art(sn.board.art), mat: sn.board.mat },
+      template: spec(sn.template),
+      cards: sn.cards.map(c => ({ spec: spec(c.spec), x: c.x, z: c.z, rot: c.rot, faceDown: c.faceDown })),
+    };
+  }
+  function saveNow() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(serialize(true))); }
+    catch (e) {
+      try {
+        localStorage.setItem(STORE_KEY, JSON.stringify(serialize(false)));
+        if (!warnedQuota) { warnedQuota = true; toast("Layout saved. The images are too large to keep after a reload.", null, null, 8000); }
+      } catch (e2) { /* storage unavailable: carry on without saving */ }
+    }
+  }
+  function loadImg(rec) {
+    return new Promise(res => {
+      const im = new Image();
+      im.onerror = () => res(null);
+      im.onload = () => {
+        const w = im.naturalWidth, h = im.naturalHeight;
+        const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(im, 0, 0);
+        const tk = 96 / Math.max(w, h), tc = document.createElement("canvas");
+        tc.width = Math.max(1, Math.round(w * tk)); tc.height = Math.max(1, Math.round(h * tk));
+        tc.getContext("2d").drawImage(c, 0, 0, tc.width, tc.height);
+        res({ id: ++imgCounter, canvas: c, w, h, name: String(rec.n || "image"), thumb: tc.toDataURL(), edge: null, _data: rec.u });
+      };
+      im.src = rec.u;
+    });
+  }
+  async function restoreSaved() {
+    let raw; try { raw = localStorage.getItem(STORE_KEY); } catch (e) { return false; }
+    if (!raw) return false;
+    try {
+      const d = JSON.parse(raw); if (!d || d.v !== 1 || !d.board || !d.template || !Array.isArray(d.cards)) return false;
+      const imgs = {};
+      await Promise.all(Object.keys(d.imgs || {}).map(async id => { imgs[id] = await loadImg(d.imgs[id]); }));
+      const num = (v, def, lo, hi) => { v = +v; return Number.isFinite(v) ? clamp(v, lo, hi) : def; };
+      const art = a => ({ img: (a && a.img && imgs[a.img]) || null, flip: !!(a && a.flip), zoom: num(a && a.zoom, 1, 1, 5), px: num(a && a.px, 0, -100, 100), py: num(a && a.py, 0, -100, 100) });
+      const mat = m => ({ kind: m && MATERIALS.some(x => x.id === m.kind) ? m.kind : "matte", k: num(m && m.k, 0.55, 0, 1) });
+      const spec = sp => {
+        const w = num(sp.w, 63.5, 5, 2000), h = num(sp.h, 88.9, 5, 2000);
+        return { w, h, t: num(sp.t, 0.3, 0.05, 100), r: num(sp.r, 0, 0, Math.min(w, h) / 2), front: art(sp.front), back: art(sp.back), mat: mat(sp.mat) };
+      };
+      const bw = num(d.board.w, 300, 30, 4000), bh = num(d.board.h, 300, 30, 4000);
+      applySnapshot({
+        board: { w: bw, h: bh, t: num(d.board.t, 6, 1, 200), r: num(d.board.r, 0, 0, Math.min(bw, bh) / 2), art: art(d.board.art), mat: mat(d.board.mat) },
+        template: spec(d.template),
+        cards: d.cards.slice(0, 200).map(c => ({ spec: spec(c.spec), x: num(c.x, 0, -5000, 5000), z: num(c.z, 0, -5000, 5000), rot: num(c.rot, 0, -3600, 3600), faceDown: !!c.faceDown })),
+      });
+      if (d.unit === "in") setUnit("in");
+      return true;
+    } catch (e) { console.warn("Could not restore saved session", e); return false; }
+  }
+  window.addEventListener("pagehide", () => { flush(); clearTimeout(saveTimer); if (settledSnap) saveNow(); });
+
+  /* ---------- Save the current view as a PNG ---------- */
+  $("savePngBtn").addEventListener("click", () => {
+    renderer.render(scene, camera);
+    const src = renderer.domElement, c = document.createElement("canvas"); c.width = src.width; c.height = src.height;
+    const g = c.getContext("2d"); g.fillStyle = "#16181d"; g.fillRect(0, 0, c.width, c.height); g.drawImage(src, 0, 0);
+    const d = new Date(), p = n => String(n).padStart(2, "0");
+    const name = `tablebench-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.png`;
+    c.toBlob(blob => {
+      if (!blob) { toast("Couldn't export the image."); return; }
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast("Saved " + name);
+    }, "image/png");
+  });
+
+  /* ---------- Shortcuts: undo/redo, and keyboard control of the selected card ---------- */
+  window.addEventListener("keydown", e => {
+    if (isTyping(e)) return;
+    const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.altKey) {
+      if (k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+      else if (k === "y") { e.preventDefault(); redo(); }
+      else if (k === "d" && selectedId != null && !freeMode) { e.preventDefault(); duplicateCard(selectedId); }
+      return;
+    }
+    if (e.altKey || freeMode) return;
+    const rec = selectedRec(); if (!rec) return;
+    if (k === "delete" || k === "backspace") { e.preventDefault(); removeCard(rec.id); }
+    else if (k === "r" && !e.repeat) rotateCard(rec.id);
+    else if (k === "x" && !e.repeat) flipCard(rec.id);
+    else if (k.startsWith("arrow") && (e.target === document.body || e.target === viewportEl)) {
+      e.preventDefault();
+      const stp = e.shiftKey ? 5 : 1;
+      moveCard(rec, rec.x + (k === "arrowright" ? stp : k === "arrowleft" ? -stp : 0), rec.z + (k === "arrowdown" ? stp : k === "arrowup" ? -stp : 0));
+    }
+  });
+
+  /* =====================================================================
      Loop / resize / init
      ===================================================================== */
   function resize() {
@@ -1194,16 +1473,31 @@
       yaw += (targetYaw - yaw) * 0.12; pitch += (targetPitch - pitch) * 0.12; dist += (targetDist - dist) * 0.12;
       applyCamera();
     }
+    for (const c of cards) {
+      if (c.drop > 0) {
+        const u = Math.min(1, (now - c.dropT0) / 380);
+        c.drop = u >= 1 ? 0 : 1.4 * (1 - easeOut(u));
+        c.pivot.position.y = (c.baseY || 0) + c.drop;
+      }
+    }
     renderer.render(scene, camera);
   }
 
   // boot
   rebuildBoard();
   dist = targetDist = defaultDistance();
-  syncBoardUI();
-  addCard();                       // start with one card on the board so adjustments are visible immediately
-  cards[0].x = 0; cards[0].z = 0; placeCard(cards[0]); updateStacking();
+  syncBoardUI(); syncEditor(); renderCardList();
   applyCineUI(); updateHint(); updateSpecChips();
   resize(); applyCamera();
   requestAnimationFrame(animate);
+
+  let hasSaved = false;
+  try { hasSaved = !!localStorage.getItem(STORE_KEY); } catch (e) { /* storage blocked */ }
+  const firstCard = () => { const r = addCard(); r.drop = 0; updateStacking(); };
+  if (hasSaved) {
+    restoreSaved().then(ok => { if (ok) { dist = targetDist = defaultDistance(); } else firstCard(); histInit(); });
+  } else {
+    firstCard(); histInit();
+    toast("Drag to orbit, scroll to zoom, drag a card to move it. The ? button lists every control.", null, null, 7000);
+  }
 })();

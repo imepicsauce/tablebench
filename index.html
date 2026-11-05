@@ -3,163 +3,233 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#14161b">
 <title>TableBench — Board &amp; Card Visualizer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 
+<!-- Icon sprite: one stroke weight, one size grid -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/></symbol>
+    <symbol id="i-topdown" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="8" y="8" width="8" height="8" rx="1"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-spin" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-flip" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3"/><path d="M12 20v2M12 14v2M12 8v2M12 2v2"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
+    <symbol id="i-sheet" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+  </defs>
+</svg>
+
 <div class="app">
-  <aside class="rail" id="rail">
-    <div class="brand"><span class="mark">TABLE<span>BENCH</span></span></div>
-    <span class="eyebrow">board + card visualizer</span>
+  <aside class="rail" id="rail" aria-label="Board and card settings">
+    <button class="sheet-handle" id="sheetHandle" type="button" aria-expanded="false" aria-controls="railScroll">
+      <span class="sheet-grip" aria-hidden="true"></span>
+      <span class="sheet-label">Board &amp; card settings</span>
+      <svg class="ic" aria-hidden="true"><use href="#i-sheet"/></svg>
+    </button>
 
-    <!-- Units -->
-    <div class="section">
-      <div class="section-title">
-        <span class="lead">Units</span>
-        <div class="unit-toggle" id="unitToggle">
-          <button data-unit="mm" class="active">mm</button>
-          <button data-unit="in">in</button>
-        </div>
+    <header class="rail-head">
+      <h1 class="brand">TableBench</h1>
+      <div class="unit-toggle" id="unitToggle" role="group" aria-label="Units">
+        <button type="button" data-unit="mm" class="active" aria-pressed="true">mm</button>
+        <button type="button" data-unit="in" aria-pressed="false">in</button>
       </div>
-    </div>
+    </header>
 
-    <!-- Board -->
-    <div class="section">
-      <div class="section-title"><span class="lead">Board</span></div>
-      <div class="presets" id="boardPresets"></div>
-      <div class="field-row">
-        <div class="field"><label for="boardW">Width</label><input type="number" id="boardW" min="0"></div>
-        <div class="field"><label for="boardH">Height</label><input type="number" id="boardH" min="0"></div>
-        <div class="field"><label for="boardT">Thick</label><input type="number" id="boardT" min="0"></div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label for="boardRSlider">Corner radius <span class="cap" id="boardRMax"></span></label>
-          <div class="slider-row">
-            <input type="range" id="boardRSlider" min="0" max="10" step="0.5">
-            <input type="number" id="boardRInput" min="0">
+    <div class="rail-scroll" id="railScroll">
+
+      <!-- Board -->
+      <section class="acc" data-sec="board">
+        <h2 class="acc-h"><button type="button" class="acc-head" id="accBtn-board" aria-expanded="false" aria-controls="accBody-board">
+          <span class="acc-text"><span class="acc-title">Board</span><span class="acc-sum" id="sumBoard"></span></span>
+          <svg class="ic chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button></h2>
+        <div class="acc-body" id="accBody-board" role="region" aria-labelledby="accBtn-board" hidden>
+          <div class="presets" id="boardPresets" role="group" aria-label="Board size presets"></div>
+          <div class="field-row">
+            <div class="field"><label for="boardW">Width</label><input type="number" inputmode="decimal" id="boardW" min="0"></div>
+            <div class="field"><label for="boardH">Height</label><input type="number" inputmode="decimal" id="boardH" min="0"></div>
+            <div class="field"><label for="boardT">Thickness</label><input type="number" inputmode="decimal" id="boardT" min="0"></div>
           </div>
-        </div>
-      </div>
-      <div id="boardArt"></div>
-      <div id="boardMat"></div>
-    </div>
-
-    <!-- Card -->
-    <div class="section">
-      <div class="section-title">
-        <span class="lead">Card</span>
-        <span class="trail">
-          <button class="link-btn" id="deselectBtn" hidden>deselect</button>
-          <span class="badge" id="editBadge">Template</span>
-        </span>
-      </div>
-      <p class="foot-note" id="editNote"></p>
-      <div class="presets" id="cardPresets"></div>
-      <div class="field-row">
-        <div class="field"><label for="cardW">Width</label><input type="number" id="cardW" min="0"></div>
-        <div class="field"><label for="cardH">Height</label><input type="number" id="cardH" min="0"></div>
-        <div class="field"><label for="cardT">Thick</label><input type="number" id="cardT" min="0"></div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label for="cardRSlider">Corner radius <span class="cap" id="cardRMax"></span></label>
-          <div class="slider-row">
-            <input type="range" id="cardRSlider" min="0" max="10" step="0.05">
-            <input type="number" id="cardRInput" min="0">
+          <div class="field">
+            <label for="boardRSlider">Corner radius <span class="cap" id="boardRMax"></span></label>
+            <div class="slider-row">
+              <input type="range" id="boardRSlider" min="0" max="10" step="0.5">
+              <input type="number" inputmode="decimal" id="boardRInput" min="0" aria-label="Board corner radius value">
+            </div>
           </div>
+          <div id="boardArt"></div>
+          <div id="boardMat"></div>
         </div>
-      </div>
-      <div id="cardFrontArt"></div>
-      <div id="cardBackArt"></div>
-      <div id="cardMat"></div>
-      <button class="action-btn primary" id="addCardBtn">✚ &nbsp;Add card to table</button>
+      </section>
+
+      <!-- Card -->
+      <section class="acc" data-sec="card">
+        <h2 class="acc-h"><button type="button" class="acc-head" id="accBtn-card" aria-expanded="true" aria-controls="accBody-card">
+          <span class="acc-text"><span class="acc-title">Card</span><span class="acc-sum" id="sumCard"></span></span>
+          <svg class="ic chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button></h2>
+        <div class="acc-body" id="accBody-card" role="region" aria-labelledby="accBtn-card">
+          <div class="edit-strip" id="editStrip">
+            <p class="edit-state" id="editState" aria-live="polite"></p>
+            <button type="button" class="btn-ghost" id="deselectBtn" hidden>Done</button>
+          </div>
+          <div class="presets" id="cardPresets" role="group" aria-label="Card size presets"></div>
+          <div class="field-row">
+            <div class="field"><label for="cardW">Width</label><input type="number" inputmode="decimal" id="cardW" min="0"></div>
+            <div class="field"><label for="cardH">Height</label><input type="number" inputmode="decimal" id="cardH" min="0"></div>
+            <div class="field"><label for="cardT">Thickness</label><input type="number" inputmode="decimal" id="cardT" min="0"></div>
+          </div>
+          <div class="field">
+            <label for="cardRSlider">Corner radius <span class="cap" id="cardRMax"></span></label>
+            <div class="slider-row">
+              <input type="range" id="cardRSlider" min="0" max="10" step="0.05">
+              <input type="number" inputmode="decimal" id="cardRInput" min="0" aria-label="Card corner radius value">
+            </div>
+          </div>
+          <div class="field-row" id="posRow" hidden>
+            <div class="field"><label for="cardX">X <span class="cap" id="posUnit"></span></label><input type="number" inputmode="decimal" id="cardX"></div>
+            <div class="field"><label for="cardZ">Y <span class="cap" id="posUnit2"></span></label><input type="number" inputmode="decimal" id="cardZ"></div>
+            <div class="field"><label for="cardRot">Rotation <span class="cap">deg</span></label><input type="number" inputmode="decimal" id="cardRot" step="any"></div>
+          </div>
+          <div id="cardFrontArt"></div>
+          <div id="cardBackArt"></div>
+          <div id="cardMat"></div>
+        </div>
+      </section>
+
+      <!-- On the table -->
+      <section class="acc" data-sec="table">
+        <h2 class="acc-h"><button type="button" class="acc-head" id="accBtn-table" aria-expanded="false" aria-controls="accBody-table">
+          <span class="acc-text"><span class="acc-title">On the table</span><span class="acc-sum" id="sumTable"></span></span>
+          <svg class="ic chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button></h2>
+        <div class="acc-body" id="accBody-table" role="region" aria-labelledby="accBtn-table" hidden>
+          <ul class="card-list" id="cardList" aria-label="Cards on the table"></ul>
+          <button type="button" class="btn-ghost danger" id="clearCardsBtn">Clear all cards</button>
+        </div>
+      </section>
     </div>
 
-    <!-- On the table -->
-    <div class="section">
-      <div class="section-title">
-        <span class="lead">On the table</span>
-        <button class="link-btn" id="clearCardsBtn">clear all</button>
-      </div>
-      <div class="card-list" id="cardList"></div>
-    </div>
-
-    <!-- View -->
-    <div class="section">
-      <div class="section-title"><span class="lead">View</span></div>
-      <button class="action-btn" id="freeCamBtn">🎥 &nbsp;Free camera <span class="kbd">F</span></button>
-      <div class="free-panel" id="freePanel">
-        <div class="keys-legend">
-          <span><span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> move</span>
-          <span><span class="kbd">E</span> up &nbsp;<span class="kbd">Q</span> down &nbsp;<span class="kbd">Shift</span> boost</span>
-          <span>drag = look &nbsp;·&nbsp; scroll = dolly &nbsp;·&nbsp; <span class="kbd">Esc</span> exit</span>
-          <span><span class="kbd">C</span> smooth motion &nbsp;·&nbsp; <span class="kbd">1</span>–<span class="kbd">5</span> camera moves</span>
-        </div>
-        <div class="field">
-          <label for="flySpeed">Fly speed <span class="cap" id="flySpeedVal">6</span></label>
-          <input type="range" id="flySpeed" min="1" max="30" step="0.5" value="6">
-        </div>
-        <div class="field">
-          <label for="fov">Lens (FOV) <span class="cap" id="fovVal">32°</span></label>
-          <input type="range" id="fov" min="18" max="90" step="1" value="32">
-        </div>
-
-        <div class="panel-sub"><span>Cinematic</span></div>
-        <div class="toggle-row">
-          <button class="mini-btn on" type="button" id="cineSmoothBtn" title="Inertia, eased turns and banking (C)">Smooth</button>
-          <button class="mini-btn" type="button" id="cineSwayBtn" title="Subtle handheld drift">Handheld</button>
-          <button class="mini-btn" type="button" id="cineBarsBtn" title="2.39:1 bars, hides the HUD">Letterbox</button>
-        </div>
-        <div class="field">
-          <label for="cineAmt">Smoothness <span class="cap" id="cineAmtVal">60</span></label>
-          <input type="range" id="cineAmt" min="0" max="100" step="1" value="60">
-        </div>
-
-        <div class="panel-sub"><span>Camera moves</span><span class="cap">focus: selected card, else board</span></div>
-        <div class="shot-grid">
-          <button class="mini-btn" type="button" data-shot="orbit"><span class="kbd">1</span>Orbit</button>
-          <button class="mini-btn" type="button" data-shot="push"><span class="kbd">2</span>Push in</button>
-          <button class="mini-btn" type="button" data-shot="crane"><span class="kbd">3</span>Crane</button>
-          <button class="mini-btn" type="button" data-shot="slide"><span class="kbd">4</span>Slide</button>
-          <button class="mini-btn" type="button" data-shot="reveal"><span class="kbd">5</span>Reveal</button>
-          <button class="mini-btn" type="button" id="stopShotBtn" disabled>■ Stop</button>
-        </div>
-        <div class="field">
-          <label for="shotDur">Move length <span class="cap" id="shotDurVal">10 s</span></label>
-          <input type="range" id="shotDur" min="3" max="40" step="1" value="10">
-        </div>
-        <div class="toggle-row">
-          <button class="mini-btn" type="button" id="loopBtn">Loop move</button>
-        </div>
-        <div class="progress"><i id="shotProg"></i></div>
-      </div>
-      <button class="action-btn" id="autoRotateBtn">↻ &nbsp;Auto-rotate</button>
-      <button class="action-btn" id="topViewBtn">⤢ &nbsp;Top-down view</button>
-      <button class="action-btn" id="resetViewBtn">⤾ &nbsp;Reset view</button>
-      <p class="foot-note">Drag a card to move it. Use a row's buttons to rotate, flip face-down, duplicate or remove. Overlapping cards stack automatically.</p>
-    </div>
+    <footer class="rail-foot">
+      <button class="btn-primary" id="addCardBtn" type="button" aria-describedby="addNote">
+        <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Add card
+      </button>
+      <p class="foot-note" id="addNote">Copies the current card settings onto a free spot on the board.</p>
+    </footer>
   </aside>
 
   <main class="stage" id="stage">
-    <div id="viewport"></div>
+    <div id="viewport" tabindex="0" role="application" aria-label="3D view of the board and cards"></div>
     <div class="corner-mark tl"></div><div class="corner-mark tr"></div>
     <div class="corner-mark bl"></div><div class="corner-mark br"></div>
     <div class="crosshair" id="crosshair"></div>
     <div class="bar top"></div><div class="bar bot"></div>
 
     <div class="stage-topbar">
-      <div class="stage-title">TABLEBENCH / <b id="stageMode">live render</b></div>
+      <p class="stage-title" id="stageMode">Live render</p>
       <div class="spec-chips" id="specChips"></div>
     </div>
 
-    <div class="stage-hint" id="hintText"></div>
+    <!-- Freecam / cinematic controls live on the stage, not in the sidebar -->
+    <section class="free-panel" id="freePanel" aria-labelledby="freeTitle" hidden>
+      <div class="fp-head">
+        <h2 id="freeTitle">Free camera</h2>
+        <button type="button" class="icon-btn" id="freeCloseBtn" aria-label="Exit free camera (Esc)" title="Exit free camera (Esc)"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </div>
+      <p class="fp-keys">WASD move · Q/E down/up · Shift boost · drag to look · scroll to dolly</p>
+      <div class="field">
+        <label for="flySpeed">Fly speed <output class="cap" id="flySpeedVal" for="flySpeed">6</output></label>
+        <input type="range" id="flySpeed" min="1" max="30" step="0.5" value="6">
+      </div>
+      <div class="field">
+        <label for="fov">Lens (field of view) <output class="cap" id="fovVal" for="fov">32°</output></label>
+        <input type="range" id="fov" min="18" max="90" step="1" value="32">
+      </div>
+
+      <h3 class="fp-sub">Cinematic</h3>
+      <div class="toggle-row">
+        <button class="chip-btn on" type="button" id="cineSmoothBtn" aria-pressed="true" title="Inertia, eased turns and banking (C)">Smooth</button>
+        <button class="chip-btn" type="button" id="cineSwayBtn" aria-pressed="false" title="Subtle handheld drift">Handheld</button>
+        <button class="chip-btn" type="button" id="cineBarsBtn" aria-pressed="false" title="2.39:1 bars, hides the interface (B)">Letterbox</button>
+      </div>
+      <div class="field">
+        <label for="cineAmt">Smoothness <output class="cap" id="cineAmtVal" for="cineAmt">60</output></label>
+        <input type="range" id="cineAmt" min="0" max="100" step="1" value="60">
+      </div>
+
+      <h3 class="fp-sub">Camera moves <span class="cap">around the selection</span></h3>
+      <div class="shot-grid">
+        <button class="chip-btn" type="button" data-shot="orbit" aria-pressed="false">Orbit <kbd>1</kbd></button>
+        <button class="chip-btn" type="button" data-shot="push" aria-pressed="false">Push in <kbd>2</kbd></button>
+        <button class="chip-btn" type="button" data-shot="crane" aria-pressed="false">Crane <kbd>3</kbd></button>
+        <button class="chip-btn" type="button" data-shot="slide" aria-pressed="false">Slide <kbd>4</kbd></button>
+        <button class="chip-btn" type="button" data-shot="reveal" aria-pressed="false">Reveal <kbd>5</kbd></button>
+        <button class="chip-btn" type="button" id="stopShotBtn" disabled><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>Stop</button>
+      </div>
+      <div class="field">
+        <label for="shotDur">Move length <output class="cap" id="shotDurVal" for="shotDur">10 s</output></label>
+        <input type="range" id="shotDur" min="3" max="40" step="1" value="10">
+      </div>
+      <div class="toggle-row">
+        <button class="chip-btn" type="button" id="loopBtn" aria-pressed="false">Loop move</button>
+      </div>
+      <div class="progress" aria-hidden="true"><i id="shotProg"></i></div>
+    </section>
+
+    <section class="help-panel" id="helpPanel" aria-labelledby="helpTitle" hidden>
+      <div class="fp-head">
+        <h2 id="helpTitle">Controls</h2>
+        <button type="button" class="icon-btn" id="helpCloseBtn" aria-label="Close help" title="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </div>
+      <dl class="keylist">
+        <div><dt>Orbit</dt><dd>drag empty space</dd></div>
+        <div><dt>Zoom</dt><dd>scroll or pinch</dd></div>
+        <div><dt>Move a card</dt><dd>drag it · arrow keys nudge 1 mm (Shift 5)</dd></div>
+        <div><dt>Rotate / flip</dt><dd><kbd>R</kbd> / <kbd>X</kbd> on the selected card</dd></div>
+        <div><dt>Duplicate / remove</dt><dd><kbd>Ctrl</kbd>+<kbd>D</kbd> / <kbd>Delete</kbd></dd></div>
+        <div><dt>Undo / redo</dt><dd><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dd></div>
+        <div><dt>Free camera</dt><dd><kbd>F</kbd> toggle · <kbd>Esc</kbd> exit</dd></div>
+        <div><dt>In free camera</dt><dd>WASD move · Q/E down/up · <kbd>C</kbd> smooth · <kbd>B</kbd> letterbox · <kbd>1</kbd>–<kbd>5</kbd> moves</dd></div>
+      </dl>
+      <p class="foot-note">Your board, cards and images are saved in this browser automatically.</p>
+    </section>
+
+    <div class="toolbar" id="toolbar" role="toolbar" aria-label="View and file actions">
+      <button type="button" class="tb" id="freeCamBtn" aria-pressed="false" title="Free camera (F)"><svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg><span class="tb-label">Freecam</span></button>
+      <button type="button" class="tb" id="topViewBtn" aria-pressed="false" title="Top-down view"><svg class="ic" aria-hidden="true"><use href="#i-topdown"/></svg><span class="tb-label">Top-down</span></button>
+      <button type="button" class="tb" id="autoRotateBtn" aria-pressed="false" title="Auto-rotate"><svg class="ic" aria-hidden="true"><use href="#i-spin"/></svg><span class="tb-label">Rotate</span></button>
+      <button type="button" class="tb" id="resetViewBtn" title="Reset view"><svg class="ic" aria-hidden="true"><use href="#i-reset"/></svg><span class="tb-label">Reset</span></button>
+      <span class="tb-sep" aria-hidden="true"></span>
+      <button type="button" class="tb" id="undoBtn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg></button>
+      <button type="button" class="tb" id="redoBtn" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled><svg class="ic" aria-hidden="true"><use href="#i-redo"/></svg></button>
+      <span class="tb-sep" aria-hidden="true"></span>
+      <button type="button" class="tb" id="savePngBtn" title="Save the view as a PNG image"><svg class="ic" aria-hidden="true"><use href="#i-download"/></svg><span class="tb-label">Save PNG</span></button>
+      <button type="button" class="tb" id="helpBtn" aria-expanded="false" aria-controls="helpPanel" title="Controls and shortcuts" aria-label="Controls and shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
+    </div>
+
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
   </main>
 </div>
 
+<noscript><p style="padding:24px;color:#eae7e0">TableBench needs JavaScript and WebGL to render the 3D view.</p></noscript>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="js/app.js"></script>
 </body>

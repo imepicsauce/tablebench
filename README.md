@@ -25,6 +25,10 @@ python3 -m http.server 8000
 - **Camera**: orbit, top-down view, auto-rotate, and a **freecam** with WASD / QE flight.
 - **Cinematic mode** (in freecam): inertia and eased turns, banking, handheld sway, FOV control, letterbox bars, and automated moves (Orbit, Push in, Crane, Slide, Reveal) with adjustable length and looping.
 - **Units**: millimetres or inches.
+- **Editing state**: the Card section says whether you are editing a selected card or the defaults for the next one. Selected cards also get numeric X / Y / rotation fields. New cards land on a free spot on the board.
+- **Autosave and undo**: your board, cards and images are saved in the browser (localStorage) and restored on reload. Undo / redo cover every change, and removals offer an Undo toast.
+- **Export**: Save PNG downloads the current view.
+- **Layout**: the sidebar is an accordion (Board, Card, On the table) with a pinned Add card button. Camera actions live in a toolbar on the stage, and freecam options in a floating panel. On narrow screens the sidebar becomes a bottom sheet.
 
 ## Controls
 
@@ -39,7 +43,13 @@ python3 -m http.server 8000
 | `Shift` | Boost speed in freecam |
 | `C` | Toggle smooth (cinematic) motion in freecam |
 | `1` - `5` | Camera moves: Orbit, Push in, Crane, Slide, Reveal |
-| `Esc` | Exit freecam |
+| `B` | Toggle letterbox in freecam |
+| `Esc` | Exit freecam, or close the help panel |
+| `R` / `X` | Rotate / flip the selected card |
+| Arrow keys | Nudge the selected card 1 mm (`Shift` for 5 mm) |
+| `Delete` | Remove the selected card |
+| `Ctrl` + `D` | Duplicate the selected card |
+| `Ctrl` + `Z` / `Ctrl` + `Shift` + `Z` | Undo / redo |
 
 ## Project structure
 
@@ -47,13 +57,14 @@ python3 -m http.server 8000
 tablebench/
 ├── index.html        Markup: sidebar controls and the 3D stage
 ├── css/
-│   └── styles.css    All styling
+│   └── styles.css    All styling (dark theme, gold reserved for primary action, selection and focus)
 └── js/
     └── app.js        Scene, geometry, materials, camera and UI logic
 ```
 
 ## Notes
 
+- Autosave keeps each image once as a JPEG. If the browser's storage quota is too small for the images, the layout is still saved and you are told the images won't survive a reload.
 - Uploaded images are downscaled in the browser (2048 px for the board, 1024 px for cards). Nothing is uploaded anywhere.
 - Rounded-corner geometry is generated procedurally, so any radius up to half the shortest side works.
 - Holographic foil is a shader approximation, not a physical simulation.
