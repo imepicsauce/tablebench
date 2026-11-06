@@ -28,10 +28,10 @@
      ===================================================================== */
   const newArt   = () => ({ img: null, flip: false, zoom: 1, px: 0, py: 0 });
   const cloneArt = a => ({ img: a.img, flip: a.flip, zoom: a.zoom, px: a.px, py: a.py });
-  const cloneSpec = s => ({ w: s.w, h: s.h, t: s.t, r: s.r, front: cloneArt(s.front), back: cloneArt(s.back), mat: { kind: s.mat.kind, k: s.mat.k } });
+  const cloneSpec = s => ({ w: s.w, h: s.h, t: s.t, r: s.r, front: cloneArt(s.front), back: cloneArt(s.back), mat: { kind: s.mat.kind, k: s.mat.k, pat: s.mat.pat || "diffraction" } });
 
-  const board = { w: 300, h: 300, t: 6, r: 8, art: newArt(), tex: null, texInfo: null, mat: { kind: "matte", k: 0.55 } };
-  const template = { w: 63.5, h: 88.9, t: 0.30, r: 3.18, front: newArt(), back: newArt(), mat: { kind: "glossy", k: 0.55 } };
+  const board = { w: 300, h: 300, t: 6, r: 8, art: newArt(), tex: null, texInfo: null, mat: { kind: "matte", k: 0.55, pat: "diffraction" } };
+  const template = { w: 63.5, h: 88.9, t: 0.30, r: 3.18, front: newArt(), back: newArt(), mat: { kind: "glossy", k: 0.55, pat: "diffraction" } };
   const cards = [];
   let nextId = 1, selectedId = null;
 
@@ -313,27 +313,76 @@
     return t;
   })();
 
+  // Fine etched noise for the frosted finish
+  const frostTex = (() => {
+    const N = 64, c = document.createElement("canvas"); c.width = c.height = N;
+    const g = c.getContext("2d"), img = g.createImageData(N, N);
+    for (let i = 0; i < N * N; i++) { const v = 90 + Math.random() * 110; img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255; }
+    g.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = maxAniso;
+    return t;
+  })();
+
+  // Wavelength (0 = violet .. 1 = red) -> approximate spectral colour
+  const SPECTRUM_GLSL = `
+    vec3 spectrum(float x) {
+      float r = exp(-pow((x - 0.88) / 0.14, 2.0)) + 0.30 * exp(-pow((x - 0.02) / 0.10, 2.0));
+      float g = exp(-pow((x - 0.55) / 0.17, 2.0));
+      float b = exp(-pow((x - 0.20) / 0.15, 2.0));
+      return vec3(r, g, b);
+    }`;
+  /* Diffraction foil: a grating of pitch d sends wavelength L to the viewer when
+     d * (sin(thetaI) + sin(thetaO)) = m * L. s below is that sum along the grating direction,
+     taken from the key light and the view vector, so colour follows the light and the camera
+     like a real hologram. Orders 1-3 overlap and mix toward pastel. */
   const HOLO_GLSL = `
     if (uHolo > 0.5) {
-      vec3 Vv = normalize(vViewPosition);
-      float ndv = clamp(dot(normalize(normal), Vv), 0.0, 1.0);
-      float ph = (1.0 - ndv) * 2.4 + vRawUv.x * 0.7 + vRawUv.y * 0.5;
-      vec3 rb = 0.5 + 0.5 * cos(6.28318 * (ph + vec3(0.0, 0.33, 0.67)));
-      float band = 0.5 + 0.5 * sin(ph * 14.0 + vRawUv.x * 9.0);
-      vec2 cell = floor(vRawUv * uTile);
-      float rnd = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-      float dotMask = smoothstep(0.5, 0.12, length(fract(vRawUv * uTile) - 0.5));
-      float spark = smoothstep(0.9, 1.0, fract(rnd + ph * 1.7)) * dotMask;
       float st = uHoloStrength;
-      diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * (0.55 + 0.9 * rb), 0.55 * st);
-      totalEmissiveRadiance += rb * (0.10 + 0.22 * band) * st * (0.4 + 0.6 * (1.0 - ndv));
-      totalEmissiveRadiance += vec3(1.0) * spark * 0.45 * st;
+      vec3 Vv = normalize(vViewPosition);
+      vec3 Nn = normalize(normal);
+      float ndv = clamp(dot(Nn, Vv), 0.0, 1.0);
+      float luma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+      if (uHoloPat < 0.5) {
+        vec3 Ld = vec3(0.0, 0.0, 1.0);
+        #if NUM_DIR_LIGHTS > 0
+          Ld = normalize(directionalLights[0].direction);
+        #endif
+        vec3 q0 = dFdx(-vViewPosition), q1 = dFdy(-vViewPosition);
+        vec2 s0 = dFdx(vRawUv), s1 = dFdy(vRawUv);
+        vec3 T = q0 * s1.t - q1 * s0.t;
+        T = normalize(T - Nn * dot(Nn, T) + 1e-6);
+        vec3 B = cross(Nn, T);
+        vec3 G = normalize(T * 0.8192 + B * 0.5736);                  // grating axis, 35 deg off the card axis
+        float s = dot(Ld + Vv, G);
+        float d = 1800.0 * (1.0 + 0.05 * sin(vRawUv.x * 5.0 + vRawUv.y * 3.0));
+        vec3 col = vec3(0.0);
+        for (int m = 1; m <= 3; m++) {
+          float lam = d * abs(s) / float(m);
+          float vis = smoothstep(370.0, 430.0, lam) * (1.0 - smoothstep(670.0, 730.0, lam));
+          col += spectrum(clamp((lam - 380.0) / 320.0, 0.0, 1.0)) * vis / sqrt(float(m));
+        }
+        float lift = 0.35 + 0.65 * pow(1.0 - ndv, 0.6);                 // foil reads strongest at glancing angles
+        totalEmissiveRadiance += col * st * 0.55 * lift * (0.45 + 0.55 * luma);
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * (0.7 + 0.5 * col), 0.35 * st);
+      } else {
+        float ph = (1.0 - ndv) * 2.4 + vRawUv.x * 0.7 + vRawUv.y * 0.5;
+        vec3 rb = 0.5 + 0.5 * cos(6.28318 * (ph + vec3(0.0, 0.33, 0.67)));
+        float band = 0.5 + 0.5 * sin(ph * 14.0 + vRawUv.x * 9.0);
+        vec2 cell = floor(vRawUv * uTile);
+        float rnd = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+        float dotMask = smoothstep(0.5, 0.12, length(fract(vRawUv * uTile) - 0.5));
+        float spark = smoothstep(0.9, 1.0, fract(rnd + ph * 1.7)) * dotMask;
+        diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * (0.55 + 0.9 * rb), 0.55 * st);
+        totalEmissiveRadiance += rb * (0.10 + 0.22 * band) * st * (0.4 + 0.6 * (1.0 - ndv));
+        totalEmissiveRadiance += vec3(1.0) * spark * 0.45 * st;
+      }
     }`;
 
   // Physical material with a small shader hook: raw-UV varying, tiled bump in physical units, holographic foil.
   function makeSurfaceMat(params) {
     const mat = new THREE.MeshPhysicalMaterial(params);
-    const U = mat.userData.surf = { uHolo: { value: 0 }, uHoloStrength: { value: 0.6 }, uTile: { value: new THREE.Vector2(10, 10) } };
+    const U = mat.userData.surf = { uHolo: { value: 0 }, uHoloStrength: { value: 0.6 }, uHoloPat: { value: 0 }, uTile: { value: new THREE.Vector2(10, 10) } };
     mat.envMap = envTex;
     mat.onBeforeCompile = shader => {
       Object.assign(shader.uniforms, U);
@@ -341,7 +390,7 @@
         .replace("#include <common>", "#include <common>\nvarying vec2 vRawUv;")
         .replace("#include <begin_vertex>", "#include <begin_vertex>\nvRawUv = uv;");
       shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying vec2 vRawUv;\nuniform float uHolo;\nuniform float uHoloStrength;\nuniform vec2 uTile;")
+        .replace("#include <common>", "#include <common>\nvarying vec2 vRawUv;\nuniform float uHolo;\nuniform float uHoloStrength;\nuniform float uHoloPat;\nuniform vec2 uTile;" + SPECTRUM_GLSL)
         .replace("#include <bumpmap_pars_fragment>", THREE.ShaderChunk.bumpmap_pars_fragment.replace(/vUv/g, "(vRawUv * uTile)"))
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n" + HOLO_GLSL);
     };
@@ -356,13 +405,24 @@
       case "glossy":
         mat.roughness = lerp(0.40, 0.05, k); mat.clearcoat = 1; mat.clearcoatRoughness = lerp(0.30, 0.02, k);
         mat.envMapIntensity = lerp(0.35, 1.0, k); break;
+      case "frosted":
+        mat.roughness = lerp(0.78, 0.50, k); mat.clearcoat = lerp(0.0, 0.3, k); mat.clearcoatRoughness = 0.65;
+        mat.envMapIntensity = lerp(0.15, 0.4, k);
+        mat.bumpMap = frostTex; mat.bumpScale = lerp(0.005, 0.022, k); U.uTile.value.set(wmm / (tileMM * 2), hmm / (tileMM * 2)); break;
       case "textured":
         mat.roughness = 0.8; mat.envMapIntensity = 0.2;
         mat.bumpMap = grainTex; mat.bumpScale = lerp(0.004, 0.03, k); U.uTile.value.set(wmm / tileMM, hmm / tileMM); break;
       case "holo":
-        mat.roughness = lerp(0.40, 0.20, k); mat.metalness = lerp(0.15, 0.50, k);
-        mat.clearcoat = 0.5; mat.clearcoatRoughness = 0.1; mat.envMapIntensity = lerp(0.5, 1.1, k);
-        U.uHolo.value = 1; U.uHoloStrength.value = lerp(0.25, 1.2, k); U.uTile.value.set(wmm / HOLO_CELL_MM, hmm / HOLO_CELL_MM); break;
+        if (m.pat === "glitter") {
+          mat.roughness = lerp(0.40, 0.20, k); mat.metalness = lerp(0.15, 0.50, k);
+          mat.clearcoat = 0.5; mat.clearcoatRoughness = 0.1; mat.envMapIntensity = lerp(0.5, 1.1, k);
+          U.uHoloPat.value = 1; U.uHoloStrength.value = lerp(0.25, 1.2, k);
+        } else {
+          mat.roughness = lerp(0.45, 0.28, k); mat.metalness = lerp(0.10, 0.35, k);
+          mat.clearcoat = 0.6; mat.clearcoatRoughness = 0.12; mat.envMapIntensity = lerp(0.5, 0.9, k);
+          U.uHoloPat.value = 0; U.uHoloStrength.value = lerp(0.35, 1.5, k);
+        }
+        U.uHolo.value = 1; U.uTile.value.set(wmm / HOLO_CELL_MM, hmm / HOLO_CELL_MM); break;
       default:  // matte
         mat.roughness = 0.93; mat.envMapIntensity = 0.12;
     }
@@ -674,9 +734,14 @@
 
   const MATERIALS = [
     { id: "matte",    name: "Matte",       knob: null,             desc: "Flat finish with soft, diffuse light and no glare." },
-    { id: "glossy",   name: "Glossy",      knob: "Gloss",          desc: "Clear-coated surface with sharp reflections." },
+    { id: "frosted",  name: "Frosted",     knob: "Frost",          desc: "Fine etched surface with a soft, milky sheen. Between matte and textured." },
     { id: "textured", name: "Textured",    knob: "Texture depth",  desc: "Linen-style embossing that catches raking light." },
-    { id: "holo",     name: "Holographic", knob: "Foil intensity", desc: "Rainbow foil that shifts as you tilt or orbit." },
+    { id: "glossy",   name: "Glossy",      knob: "Gloss",          desc: "Clear-coated surface with sharp reflections." },
+    { id: "holo",     name: "Holographic", knob: "Foil intensity", desc: "" },
+  ];
+  const HOLO_PATTERNS = [
+    { id: "diffraction", name: "Diffraction", desc: "Foil that splits light like a real hologram. Colour follows the light and your viewing angle." },
+    { id: "glitter",     name: "Glitter",     desc: "Rainbow foil with sparkling flecks that shimmer as you move." },
   ];
   function buildMaterialControl(mount, { label, getMat, onChange }) {
     mount.classList.add("mat");
@@ -684,6 +749,10 @@
     mount.innerHTML = `
       <div class="grp-label" id="${mid}-l">${label}</div>
       <div class="presets" role="group" aria-labelledby="${mid}-l"></div>
+      <div class="pat" hidden>
+        <div class="grp-label" id="${mid}-pl">Pattern</div>
+        <div class="presets pats" role="group" aria-labelledby="${mid}-pl"></div>
+      </div>
       <p class="foot-note mat-desc"></p>
       <div class="field">
         <label for="${mid}-r"><span class="knob">Strength</span> <output class="cap val" for="${mid}-r"></output></label>
@@ -691,6 +760,13 @@
       </div>`;
     const grid = mount.querySelector(".presets"), desc = mount.querySelector(".mat-desc");
     const knob = mount.querySelector(".knob"), val = mount.querySelector(".val"), range = mount.querySelector("input[type=range]");
+    const patBox = mount.querySelector(".pat"), patGrid = mount.querySelector(".pats");
+    HOLO_PATTERNS.forEach(p => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "preset-btn"; b.textContent = p.name; b.dataset.id = p.id; b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", () => { getMat().pat = p.id; onChange(); refresh(); });
+      patGrid.appendChild(b);
+    });
     MATERIALS.forEach(m => {
       const b = document.createElement("button");
       b.type = "button"; b.className = "preset-btn"; b.textContent = m.name; b.dataset.id = m.id; b.setAttribute("aria-pressed", "false");
@@ -701,7 +777,10 @@
     function refresh() {
       const m = getMat(), def = MATERIALS.find(x => x.id === m.kind);
       Array.from(grid.children).forEach(b => { const on = b.dataset.id === m.kind; b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on)); });
-      desc.textContent = def.desc;
+      const pat = HOLO_PATTERNS.find(x => x.id === m.pat) || HOLO_PATTERNS[0];
+      patBox.hidden = m.kind !== "holo";
+      Array.from(patGrid.children).forEach(b => { const on = b.dataset.id === pat.id; b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on)); });
+      desc.textContent = m.kind === "holo" ? pat.desc : def.desc;
       knob.textContent = def.knob || "Strength";
       range.disabled = !def.knob;
       setVal(range, Math.round(m.k * 100));
@@ -801,7 +880,7 @@
     if (rec) {
       if (kind === "dims") rebuildCardGeometry(rec); else if (kind === "mat") applyCardSurface(rec); else refreshCardArt(rec);
       template.w = s.w; template.h = s.h; template.t = s.t; template.r = s.r;
-      template.mat = { kind: s.mat.kind, k: s.mat.k };
+      template.mat = { kind: s.mat.kind, k: s.mat.k, pat: s.mat.pat };
       if (kind === "mat") { /* template already updated above */ }
       else if (kind !== "dims") template[kind] = cloneArt(s[kind]);
       else { template.front = cloneArt(s.front); template.back = cloneArt(s.back); }
@@ -1296,9 +1375,9 @@
 
   function snapshot() {
     const art = a => ({ img: a.img, flip: a.flip, zoom: a.zoom, px: a.px, py: a.py });
-    const spec = sp => ({ w: sp.w, h: sp.h, t: sp.t, r: sp.r, front: art(sp.front), back: art(sp.back), mat: { kind: sp.mat.kind, k: sp.mat.k } });
+    const spec = sp => ({ w: sp.w, h: sp.h, t: sp.t, r: sp.r, front: art(sp.front), back: art(sp.back), mat: { kind: sp.mat.kind, k: sp.mat.k, pat: sp.mat.pat || "diffraction" } });
     return {
-      board: { w: board.w, h: board.h, t: board.t, r: board.r, art: art(board.art), mat: { kind: board.mat.kind, k: board.mat.k } },
+      board: { w: board.w, h: board.h, t: board.t, r: board.r, art: art(board.art), mat: { kind: board.mat.kind, k: board.mat.k, pat: board.mat.pat || "diffraction" } },
       template: spec(template),
       cards: cards.map(c => ({ spec: spec(c.spec), x: c.x, z: c.z, rot: c.rot, faceDown: c.faceDown })),
     };
@@ -1308,7 +1387,7 @@
   function applySnapshot(sn) {
     const selIdx = cards.findIndex(c => c.id === selectedId);
     cards.slice().forEach(disposeCard); cards.length = 0;
-    Object.assign(board, { w: sn.board.w, h: sn.board.h, t: sn.board.t, r: sn.board.r, mat: { kind: sn.board.mat.kind, k: sn.board.mat.k } });
+    Object.assign(board, { w: sn.board.w, h: sn.board.h, t: sn.board.t, r: sn.board.r, mat: { kind: sn.board.mat.kind, k: sn.board.mat.k, pat: sn.board.mat.pat || "diffraction" } });
     board.art = cloneArt(sn.board.art);
     const t = cloneSpec(sn.template); Object.assign(template, t);
     sn.cards.forEach(c => cards.push(buildCard(c.spec, c.x, c.z, c.rot, c.faceDown)));
@@ -1396,7 +1475,7 @@
       await Promise.all(Object.keys(d.imgs || {}).map(async id => { imgs[id] = await loadImg(d.imgs[id]); }));
       const num = (v, def, lo, hi) => { v = +v; return Number.isFinite(v) ? clamp(v, lo, hi) : def; };
       const art = a => ({ img: (a && a.img && imgs[a.img]) || null, flip: !!(a && a.flip), zoom: num(a && a.zoom, 1, 1, 5), px: num(a && a.px, 0, -100, 100), py: num(a && a.py, 0, -100, 100) });
-      const mat = m => ({ kind: m && MATERIALS.some(x => x.id === m.kind) ? m.kind : "matte", k: num(m && m.k, 0.55, 0, 1) });
+      const mat = m => ({ kind: m && MATERIALS.some(x => x.id === m.kind) ? m.kind : "matte", k: num(m && m.k, 0.55, 0, 1), pat: m && m.pat === "glitter" ? "glitter" : "diffraction" });
       const spec = sp => {
         const w = num(sp.w, 63.5, 5, 2000), h = num(sp.h, 88.9, 5, 2000);
         return { w, h, t: num(sp.t, 0.3, 0.05, 100), r: num(sp.r, 0, 0, Math.min(w, h) / 2), front: art(sp.front), back: art(sp.back), mat: mat(sp.mat) };
